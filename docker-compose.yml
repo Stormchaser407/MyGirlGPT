@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  stable-diffusion:
+    image: universonic/stable-diffusion-webui
+    container_name: stable-diffusion
+    ports:
+      - "7860:7860"
+    environment:
+      - CLI_ARGS=--api --listen
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  llm-server:
+    build:
+      context: ./opendan-text-generation-webui/docker
+    container_name: llm-server
+    env_file: .env
+    ports:
+      - "5001:5001"
+    volumes:
+      - ./opendan-text-generation-webui/characters:/app/characters
+      - ./opendan-text-generation-webui/models:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    command: python server.py --listen --chat --character Cherry --extensions openai --model TehVenom_Pygmalion-Vicuna-1.1-7b --api --public-api
+
+  tts-server:
+    image: synthintel2/opendan-tts-server:with_model
+    container_name: tts-server
+    ports:
+      - "6006:6006"
+
+  bot:
+    build:
+      context: ./TelegramBot
+      dockerfile: Dockerfile
+    container_name: bot
+    env_file: .env
+    environment:
+      WEBSOCKET_PORT: 8081
+      START_COMMAND_REPLY_TEXT: './src/assets/hello.txt'
+      START_COMMAND_REPLY_VOICE: './src/assets/hello.oga'
+      START_COMMAND_REPLY_PHOTO: './src/assets/hello.jpg'
+    ports:
+      - "8081:8081"
+    restart: unless-stopped
+
+  mygirl:
+    build:
+      context: ./TelegramBot
+      dockerfile: Dockerfile_mygirl
+    container_name: mygirl
+    env_file: .env
+    environment:
+      WEBSOCKET_SERVER: http://bot:8081
+      GPT_SERVER: "http://llm-server:5001"
+      TTS_SERVER: "http://tts-server:6006"
+    depends_on:
+      - bot
+      - llm-server
+      - tts-server
+      - stable-diffusion
+    restart: unless-stopped
+
+networks:
+  default:
+    driver: bridge
